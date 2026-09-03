@@ -1,0 +1,31 @@
+// Rain Alert Project - Arduino Nano
+// HW-028 Rain Sensor + Buzzer
+
+const int rainDigitalPin = 2;   // D0 ของเซนเซอร์ -> Pin 2 (digital)
+const int rainAnalogPin  = A0;  // A0 ของเซนเซอร์ -> Pin A0 (analog, วัดความแรงฝน)
+const int buzzerPin      = 8;   // Buzzer -> Pin 8
+
+void setup() {
+  pinMode(rainDigitalPin, INPUT);
+  pinMode(buzzerPin, OUTPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  int digitalVal = digitalRead(rainDigitalPin); // LOW = พบน้ำ, HIGH = แห้ง
+  int analogVal  = analogRead(rainAnalogPin);   // ค่ายิ่งต่ำ = ฝนยิ่งแรง
+
+  Serial.print("Digital: ");
+  Serial.print(digitalVal);
+  Serial.print(" | Analog: ");
+  Serial.println(analogVal);
+
+  if (digitalVal == LOW) {
+    // ตรวจพบฝน -> ส่งเสียงเตือน
+    tone(buzzerPin, 1000); 
+  } else {
+    noTone(buzzerPin);
+  }
+
+  delay(200);
+}
