@@ -1,0 +1,87 @@
+#define BLYNK_TEMPLATE_ID "TMPL6Vrd3n0Gm"
+#define BLYNK_TEMPLATE_NAME "Smart fram"
+#define BLYNK_AUTH_TOKEN "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Adafruit_SHT31.h>
+#include <BH1750.h>
+
+char ssid[] = "Homhuanta_2.4G";
+char pass[] = "0877705609";
+
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
+BH1750 lightMeter;
+
+#define SOIL_PIN A0
+#define RELAY1 D5
+#define RELAY2 D6
+#define RELAY3 D7
+#define RELAY4 D8
+
+BlynkTimer timer;
+
+// สวิตช์ควบคุม Relay 4 ช่อง (Active LOW)
+BLYNK_WRITE(V4) { digitalWrite(RELAY1, !param.asInt()); }
+BLYNK_WRITE(V5) { digitalWrite(RELAY2, !param.asInt()); }
+BLYNK_WRITE(V6) { digitalWrite(RELAY3, !param.asInt()); }
+BLYNK_WRITE(V7) { digitalWrite(RELAY4, !param.asInt()); }
+
+void sendSensorData() {
+  // อ่านค่า Soil Moisture
+  int analogSoil = analogRead(SOIL_PIN);
+  int soilPercent = map(analogSoil, 1023, 400, 0, 100);
+  soilPercent = constrain(soilPercent, 0, 100);
+
+  // อ่านค่า SHT31 และ BH1750
+  float temp = sht31.readTemperature();
+  float humidity = sht31.readHumidity();
+  float lux = lightMeter.readLightLevel();
+
+  // ส่งข้อมูลเข้า Blynk
+  Blynk.virtualWrite(V0, soilPercent);
+  Blynk.virtualWrite(V1, temp);
+  Blynk.virtualWrite(V2, humidity);
+  Blynk.virtualWrite(V3, lux);
+
+  // แสดงผลบนจอ LCD
+  lcd.setCursor(0, 0);
+  lcd.print("T:"); lcd.print((int)temp); lcd.print("C ");
+  lcd.print("H:"); lcd.print((int)humidity); lcd.print("%  ");
+
+  lcd.setCursor(0, 1);
+  lcd.print("S:"); lcd.print(soilPercent); lcd.print("% ");
+  lcd.print("L:"); lcd.print((int)lux); lcd.print("lx  ");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY1, OUTPUT); digitalWrite(RELAY1, HIGH);
+  pinMode(RELAY2, OUTPUT); digitalWrite(RELAY2, HIGH);
+  pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
+  pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
+
+  Wire.begin(D2, D1); // SDA = D2, SCL = D1
+  lcd.init();
+  lcd.backlight();
+
+  if (!sht31.begin(0x44)) { // หรือ 0x45
+    Serial.println("Could not find SHT3x sensor!");
+  }
+  
+  if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) {
+    Serial.println("Could not find BH1750 sensor!");
+  }
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  timer.setInterval(2000L, sendSensorData);
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
