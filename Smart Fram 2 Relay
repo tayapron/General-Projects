@@ -1,0 +1,92 @@
+/************* BLYNK CONFIG *************/ #define BLYNK_TEMPLATE_ID "TMPL6Um3gP-21" #define BLYNK_TEMPLATE_NAME "Temp" #define BLYNK_AUTH_TOKEN "worOfW1-zndKpmiUX8bS4yjr5m3kvydc"
+
+#define BLYNK_PRINT Serial
+
+#include <ESP8266WiFi.h> #include <BlynkSimpleEsp8266.h> #include <DHT.h> #include <LiquidCrystal_I2C.h>
+
+/************* WIFI *************/ char ssid[] = "Homhuan.ta"; char pass[] = "12345678";
+
+/************* PIN CONFIG *************/ #define DHTPIN D5 #define DHTTYPE DHT11
+
+#define RELAY_FAN D6 // Active LOW #define RELAY_PUMP D7 // Active LOW
+
+/************* LCD *************/ LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+/************* OBJECT *************/ DHT dht(DHTPIN, DHTTYPE); BlynkTimer timer;
+
+/************* THRESHOLD *************/ float TEMP_HIGH = 30.0; float TEMP_LOW = 25.0;
+
+float HUMI_HIGH = 70.0; float HUMI_LOW = 50.0;
+
+/************* MODE & STATE *************/ bool autoMode = true;
+
+bool fanManual = false; bool pumpManual = false;
+
+bool pumpOverride = false; // กดปุ่มใน Auto
+
+bool fanState = false; // true = ON bool pumpState = false;
+
+/************* BLYNK CONTROL *************/ // Auto / Manual (V4) BLYNK_WRITE(V4) { autoMode = param.asInt(); }
+
+// Fan Manual Button (V2) BLYNK_WRITE(V2) { fanManual = param.asInt(); }
+
+// Pump Manual Button / Override (V3) BLYNK_WRITE(V3) { pumpManual = param.asInt(); pumpOverride = true; // Override Auto }
+
+// Cancel Override (V10) BLYNK_WRITE(V10) { pumpOverride = false; }
+
+// Threshold from Blynk BLYNK_WRITE(V5) { TEMP_HIGH = param.asFloat(); } BLYNK_WRITE(V6) { TEMP_LOW = param.asFloat(); } BLYNK_WRITE(V7) { HUMI_HIGH = param.asFloat(); } BLYNK_WRITE(V8) { HUMI_LOW = param.asFloat(); }
+
+/************* MAIN FUNCTION *************/ void readSensorAndControl() {
+
+float temp = dht.readTemperature(); float humi = dht.readHumidity();
+
+if (isnan(temp) || isnan(humi)) { Serial.println("❌ Sensor Error"); return; }
+
+// ===== SEND TO BLYNK ===== Blynk.virtualWrite(V0, temp); Blynk.virtualWrite(V1, humi);
+
+// ===== AUTO MODE ===== if (autoMode) {
+
+// --- FAN AUTO (TEMP ONLY) ---
+if (temp >= TEMP_HIGH) {
+  fanState = true;
+}
+else if (temp <= TEMP_LOW) {
+  fanState = false;
+}
+
+// --- PUMP AUTO (HUMIDITY ONLY) ---
+if (!pumpOverride) {
+  if (humi >= HUMI_HIGH) {
+    pumpState = false;
+  }
+  else if (humi <= HUMI_LOW) {
+    pumpState = true;
+  }
+}
+} // ===== MANUAL MODE ===== else { fanState = fanManual; pumpState = pumpManual; }
+
+// ===== APPLY RELAY (Active LOW) ===== digitalWrite(RELAY_FAN, fanState ? LOW : HIGH); digitalWrite(RELAY_PUMP, pumpState ? LOW : HIGH);
+
+// ===== UPDATE BLYNK BUTTON ===== Blynk.virtualWrite(V2, fanState); Blynk.virtualWrite(V3, pumpState);
+
+// ===== LCD ===== lcd.clear(); lcd.setCursor(0, 0); lcd.print("T:"); lcd.print(temp, 1); lcd.print(" H:"); lcd.print(humi, 0);
+
+lcd.setCursor(0, 1); lcd.print("Fan:"); lcd.print(fanState ? "ON " : "OFF"); lcd.print(" Pump:"); lcd.print(pumpState ? "ON" : "OFF");
+
+// ===== SERIAL ===== Serial.println("----- STATUS -----"); Serial.print("Mode: "); Serial.println(autoMode ? "AUTO" : "MANUAL"); Serial.print("Temp: "); Serial.println(temp); Serial.print("Humi: "); Serial.println(humi); }
+
+/************* SETUP *************/ void setup() { Serial.begin(115200);
+
+pinMode(RELAY_FAN, OUTPUT); pinMode(RELAY_PUMP, OUTPUT);
+
+// Active LOW → OFF digitalWrite(RELAY_FAN, HIGH); digitalWrite(RELAY_PUMP, HIGH);
+
+lcd.init(); lcd.backlight();
+
+dht.begin();
+
+Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass); Blynk.syncAll();
+
+timer.setInterval(3000L, readSensorAndControl); }
+
+/************* LOOP *************/ void loop() { Blynk.run(); timer.run(); }
