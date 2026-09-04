@@ -1,0 +1,49 @@
+// Rain Alert Project - Arduino
+// HW-028 Rain Sensor + Buzzer + Mute Button
+
+const int rainDigitalPin = 2;   // D0 จากโมดูลเซนเซอร์น้ำฝน -> Pin 2
+const int rainAnalogPin  = A0;  // A0 จากโมดูลเซนเซอร์น้ำฝน -> Pin A0
+const int buttonPin      = 3;   // ปุ่มกด Mute -> Pin 3 (ต่อข้ามร่อง Breadboard และอีกขาต่อ GND)
+const int buzzerPin      = 8;   // Buzzer -> Pin 8
+
+bool isMuted = false;           // ตัวแปรเก็บสถานะการเปิด/ปิดเสียงเตือน
+
+void setup() {
+  pinMode(rainDigitalPin, INPUT);
+  pinMode(buttonPin, INPUT_PULLUP); // ใช้ Pull-up ตัวต้านทานภายในบอร์ด
+  pinMode(buzzerPin, OUTPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  int digitalVal  = digitalRead(rainDigitalPin); // LOW = เจอฝน/น้ำ, HIGH = ปกติ/แห้ง
+  int analogVal   = analogRead(rainAnalogPin);   // ค่าอนาล็อก (ยิ่งต่ำ = ฝนยิ่งตกหนัก)
+  int buttonState = digitalRead(buttonPin);     // LOW = กำลังกดปุ่ม
+
+  // หากมีการกดปุ่ม ให้เปลี่ยนสถานะเป็น Mute (ปิดเสียง)
+  if (buttonState == LOW) {
+    isMuted = true;
+  }
+
+  // หากฝนหยุดตกแล้ว (เซนเซอร์กลับมาแห้ง) ให้ยกเลิกการ Mute เพื่อเตรียมเตือนในครั้งถัดไป
+  if (digitalVal == HIGH) {
+    isMuted = false;
+  }
+
+  // แสดงผลค่าผ่าน Serial Monitor
+  Serial.print("Digital: ");
+  Serial.print(digitalVal);
+  Serial.print(" | Analog: ");
+  Serial.print(analogVal);
+  Serial.print(" | Mute Status: ");
+  Serial.println(isMuted ? "MUTED" : "ON");
+
+  // เงื่อนไขสั่งงาน Buzzer
+  if (digitalVal == LOW && !isMuted) {
+    tone(buzzerPin, 1000); // ตรวจพบฝนตก และยังไม่ได้กด Mute -> ส่งเสียงเตือน 1000Hz
+  } else {
+    noTone(buzzerPin);     // ฝนหยุดตก หรือกดปิดเสียงแล้ว -> ปิดเสียง
+  }
+
+  delay(200);
+}
