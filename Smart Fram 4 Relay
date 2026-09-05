@@ -12,9 +12,7 @@
 char ssid[] = "Homhuanta_2.4G";
 char pass[] = "0877705609";
 
-// กำหนด Address จอ I2C (ส่วนใหญ่เป็น 0x27 หรือ 0x3F)
 LiquidCrystal_I2C lcd(0x27, 16, 2); 
-
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 BH1750 lightMeter;
 
@@ -26,10 +24,78 @@ BH1750 lightMeter;
 
 BlynkTimer timer;
 
-BLYNK_WRITE(V4) { digitalWrite(RELAY1, !param.asInt()); }
-BLYNK_WRITE(V5) { digitalWrite(RELAY2, !param.asInt()); }
-BLYNK_WRITE(V6) { digitalWrite(RELAY3, !param.asInt()); }
-BLYNK_WRITE(V7) { digitalWrite(RELAY4, !param.asInt()); }
+// ตัวแปรสถานะโหมด (0 = Manual, 1 = Auto)
+bool isAutoMode = false;
+
+// ฟังก์ชันสั่งเปิด/ปิด Relay แบบ Active LOW
+void setRelay(int pin, int state) {
+  digitalWrite(pin, state ? LOW : HIGH);
+}
+
+// ปุ่มเปิด/ปิดโหมด Auto บน Blynk (Pin V8)
+BLYNK_WRITE(V8) {
+  isAutoMode = param.asInt();
+  Serial.print("Mode changed to: ");
+  Serial.println(isAutoMode ? "AUTO" : "MANUAL");
+}
+
+// ควบคุมแบบ Manual (ทำงานเมื่อ isAutoMode = false)
+BLYNK_WRITE(V4) {
+  if (!isAutoMode) setRelay(RELAY1, param.asInt());
+}
+
+BLYNK_WRITE(V5) {
+  if (!isAutoMode) setRelay(RELAY2, param.asInt());
+}
+
+BLYNK_WRITE(V6) {
+  if (!isAutoMode) setRelay(RELAY3, param.asInt());
+}
+
+BLYNK_WRITE(V7) {
+  if (!isAutoMode) setRelay(RELAY4, param.asInt());
+}
+
+// ฟังก์ชันเงื่อนไขทำงานอัตโนมัติ (Auto Mode)
+void autoControl(int soil, float temp, float hum, float lux) {
+  if (!isAutoMode) return;
+
+  // 1. คุม Relay 1 ตามความชื้นดิน
+  if (soil < 40) {
+    setRelay(RELAY1, HIGH);
+    Blynk.virtualWrite(V4, 1);
+  } else if (soil >= 60) {
+    setRelay(RELAY1, LOW);
+    Blynk.virtualWrite(V4, 0);
+  }
+
+  // 2. คุม Relay 2 ตามอุณหภูมิ (พัดลม)
+  if (temp > 35.0) {
+    setRelay(RELAY2, HIGH);
+    Blynk.virtualWrite(V5, 1);
+  } else if (temp <= 32.0) {
+    setRelay(RELAY2, LOW);
+    Blynk.virtualWrite(V5, 0);
+  }
+
+  // 3. คุม Relay 3 ตามความชื้นอากาศ (พ่นหมอก)
+  if (hum < 50.0) {
+    setRelay(RELAY3, HIGH);
+    Blynk.virtualWrite(V6, 1);
+  } else if (hum >= 70.0) {
+    setRelay(RELAY3, LOW);
+    Blynk.virtualWrite(V6, 0);
+  }
+
+  // 4. คุม Relay 4 ตามระดับแสง (ไฟปลูกต้นไม้/หลอดไฟ)
+  if (lux < 200.0) {
+    setRelay(RELAY4, HIGH);
+    Blynk.virtualWrite(V7, 1);
+  } else if (lux >= 500.0) {
+    setRelay(RELAY4, LOW);
+    Blynk.virtualWrite(V7, 0);
+  }
+}
 
 void sendSensorData() {
   int analogSoil = analogRead(SOIL_PIN);
@@ -40,6 +106,9 @@ void sendSensorData() {
   float humidity = sht31.readHumidity();
   float lux = lightMeter.readLightLevel();
 
+  // ประมวลผลโหมด Auto
+  autoControl(soilPercent, temp, humidity, lux);
+
   // ส่งข้อมูลเข้า Blynk
   Blynk.virtualWrite(V0, soilPercent);
   Blynk.virtualWrite(V1, temp);
@@ -49,7 +118,8 @@ void sendSensorData() {
   // แสดงผลบนจอ LCD
   lcd.setCursor(0, 0);
   lcd.print("T:"); lcd.print((int)temp); lcd.print("C ");
-  lcd.print("H:"); lcd.print((int)humidity); lcd.print("%  ");
+  lcd.print("H:"); lcd.print((int)humidity); lcd.print("% ");
+  lcd.print(isAutoMode ? "A" : "M"); // แสดงสถานะ A=Auto, M=Manual ท้ายบรรทัดแรก
 
   lcd.setCursor(0, 1);
   lcd.print("S:"); lcd.print(soilPercent); lcd.print("% ");
@@ -59,12 +129,12 @@ void sendSensorData() {
 void setup() {
   Serial.begin(115200);
 
+  // ตั้งค่า Relay เริ่มต้นปิดทั้งหมด (Active LOW: HIGH คือปิด)
   pinMode(RELAY1, OUTPUT); digitalWrite(RELAY1, HIGH);
   pinMode(RELAY2, OUTPUT); digitalWrite(RELAY2, HIGH);
   pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
   pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
 
-  // กำหนดขา I2C SDA=D2, SCL=D1
   Wire.begin(D2, D1);
 
   lcd.init();
