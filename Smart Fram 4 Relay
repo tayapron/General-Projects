@@ -1,6 +1,6 @@
 #define BLYNK_TEMPLATE_ID "TMPL6Vrd3n0Gm"
 #define BLYNK_TEMPLATE_NAME "Smart fram"
-#define BLYNK_AUTH_TOKEN "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
+#define BLYNK_AUTH_TOKEN    "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
 
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
@@ -12,7 +12,9 @@
 char ssid[] = "Homhuanta_2.4G";
 char pass[] = "0877705609";
 
-LiquidCrystal_I2C lcd(0x3F, 16, 2);
+// กำหนด Address จอ I2C (ส่วนใหญ่เป็น 0x27 หรือ 0x3F)
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 BH1750 lightMeter;
 
@@ -24,19 +26,16 @@ BH1750 lightMeter;
 
 BlynkTimer timer;
 
-// สวิตช์ควบคุม Relay 4 ช่อง (Active LOW)
 BLYNK_WRITE(V4) { digitalWrite(RELAY1, !param.asInt()); }
 BLYNK_WRITE(V5) { digitalWrite(RELAY2, !param.asInt()); }
 BLYNK_WRITE(V6) { digitalWrite(RELAY3, !param.asInt()); }
 BLYNK_WRITE(V7) { digitalWrite(RELAY4, !param.asInt()); }
 
 void sendSensorData() {
-  // อ่านค่า Soil Moisture
   int analogSoil = analogRead(SOIL_PIN);
   int soilPercent = map(analogSoil, 1023, 400, 0, 100);
   soilPercent = constrain(soilPercent, 0, 100);
 
-  // อ่านค่า SHT31 และ BH1750
   float temp = sht31.readTemperature();
   float humidity = sht31.readHumidity();
   float lux = lightMeter.readLightLevel();
@@ -65,16 +64,18 @@ void setup() {
   pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
   pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
 
-  Wire.begin(D2, D1); // SDA = D2, SCL = D1
+  // กำหนดขา I2C SDA=D2, SCL=D1
+  Wire.begin(D2, D1);
+
   lcd.init();
   lcd.backlight();
 
-  if (!sht31.begin(0x44)) { // หรือ 0x45
-    Serial.println("Could not find SHT3x sensor!");
+  if (!sht31.begin(0x44)) {
+    Serial.println("SHT3x not found!");
   }
   
   if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) {
-    Serial.println("Could not find BH1750 sensor!");
+    Serial.println("BH1750 not found!");
   }
 
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
