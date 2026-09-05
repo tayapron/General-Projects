@@ -144,8 +144,18 @@ void setup() {
     Serial.println("SHT3x not found!");
   }
   
-  if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) {
-    Serial.println("BH1750 not found!");
+  // ระบุ Mode, Address (0x23) และช่องทาง Wire ให้ครบถ้วน
+  if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &Wire)) {
+    Serial.println("BH1750 not found at 0x23!");
+    
+    // ถ้าไม่เจอที่ 0x23 ให้ลองเช็กที่ 0x5C เผื่อขา ADDR ลอย/ต่อ VCC
+    if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x5C, &Wire)) {
+      Serial.println("BH1750 not found at 0x5C either!");
+    } else {
+      Serial.println("BH1750 found at 0x5C!");
+    }
+  } else {
+    Serial.println("BH1750 found at 0x23!");
   }
 
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
