@@ -1,0 +1,262 @@
+#include <DHT.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// ================= PIN CONFIG =================
+
+#define DHTPIN 5
+#define DHTTYPE DHT11
+
+#define RELAY_FAN 6
+#define RELAY_PUMP 7
+
+#define SOIL_PIN A0
+
+
+// ================= LCD =================
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+
+// ================= DHT =================
+
+DHT dht(DHTPIN, DHTTYPE);
+
+
+// ================= THRESHOLD =================
+
+// อุณหภูมิ
+float TEMP_HIGH = 30.0;
+float TEMP_LOW  = 25.0;
+
+
+// ความชื้นในดิน
+// ปรับค่าให้เหมาะกับ Sensor จริงภายหลัง
+int SOIL_DRY = 30;    // ต่ำกว่า 30% = ดินแห้ง → เปิดปั๊ม
+int SOIL_WET = 70;    // มากกว่า 70% = ดินชื้น → ปิดปั๊ม
+
+
+// ================= STATE =================
+
+bool fanState = false;
+bool pumpState = false;
+
+
+// =================================================
+// SETUP
+// =================================================
+
+void setup() {
+
+  Serial.begin(9600);
+
+  // Relay
+  pinMode(RELAY_FAN, OUTPUT);
+  pinMode(RELAY_PUMP, OUTPUT);
+
+  // Relay Active LOW
+  digitalWrite(RELAY_FAN, HIGH);
+  digitalWrite(RELAY_PUMP, HIGH);
+
+  // DHT
+  dht.begin();
+
+  // LCD
+  lcd.init();
+  lcd.backlight();
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Farm");
+
+  lcd.setCursor(0, 1);
+  lcd.print("System Start");
+
+  delay(2000);
+
+  lcd.clear();
+}
+
+
+// =================================================
+// LOOP
+// =================================================
+
+void loop() {
+
+  // =================================================
+  // READ DHT11
+  // =================================================
+
+  float temp = dht.readTemperature();
+
+
+  // =================================================
+  // READ SOIL SENSOR
+  // =================================================
+
+  int soilRaw = analogRead(SOIL_PIN);
+
+
+  // แปลงค่า Analog เป็นเปอร์เซ็นต์
+
+  // โดยทั่วไป
+  // 1023 = แห้ง
+  // 0    = เปียก
+
+  int soilPercent = map(soilRaw, 1023, 0, 0, 100);
+
+  soilPercent = constrain(soilPercent, 0, 100);
+
+
+  // =================================================
+  // SENSOR ERROR
+  // =================================================
+
+  if (isnan(temp)) {
+
+    Serial.println("DHT Sensor Error!");
+
+    lcd.clear();
+
+    lcd.setCursor(0, 0);
+    lcd.print("DHT Error!");
+
+    delay(2000);
+
+    return;
+  }
+
+
+  // =================================================
+  // FAN CONTROL
+  // =================================================
+
+  if (temp >= TEMP_HIGH) {
+
+    fanState = true;
+
+  }
+  else if (temp <= TEMP_LOW) {
+
+    fanState = false;
+
+  }
+
+
+  // =================================================
+  // WATER PUMP CONTROL
+  // =================================================
+
+  if (soilPercent <= SOIL_DRY) {
+
+    pumpState = true;
+
+  }
+  else if (soilPercent >= SOIL_WET) {
+
+    pumpState = false;
+
+  }
+
+
+  // =================================================
+  // RELAY FAN
+  // =================================================
+
+  if (fanState) {
+
+    digitalWrite(RELAY_FAN, LOW);
+
+  }
+  else {
+
+    digitalWrite(RELAY_FAN, HIGH);
+
+  }
+
+
+  // =================================================
+  // RELAY PUMP
+  // =================================================
+
+  if (pumpState) {
+
+    digitalWrite(RELAY_PUMP, LOW);
+
+  }
+  else {
+
+    digitalWrite(RELAY_PUMP, HIGH);
+
+  }
+
+
+  // =================================================
+  // LCD
+  // =================================================
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+
+  lcd.print("T:");
+  lcd.print(temp, 1);
+  lcd.print("C ");
+
+  lcd.print("S:");
+  lcd.print(soilPercent);
+  lcd.print("%");
+
+
+  lcd.setCursor(0, 1);
+
+  lcd.print("F:");
+
+  if (fanState) {
+    lcd.print("ON ");
+  }
+  else {
+    lcd.print("OFF");
+  }
+
+  lcd.print(" P:");
+
+  if (pumpState) {
+    lcd.print("ON");
+  }
+  else {
+    lcd.print("OFF");
+  }
+
+
+  // =================================================
+  // SERIAL MONITOR
+  // =================================================
+
+  Serial.println("--------------------");
+
+  Serial.print("Temperature : ");
+  Serial.print(temp);
+  Serial.println(" C");
+
+  Serial.print("Soil Raw    : ");
+  Serial.println(soilRaw);
+
+  Serial.print("Soil Moist  : ");
+  Serial.print(soilPercent);
+  Serial.println(" %");
+
+  Serial.print("Fan         : ");
+  Serial.println(fanState ? "ON" : "OFF");
+
+  Serial.print("Pump        : ");
+  Serial.println(pumpState ? "ON" : "OFF");
+
+  Serial.println("--------------------");
+
+
+  // อ่านค่าทุก 3 วินาที
+  delay(3000);
+}
