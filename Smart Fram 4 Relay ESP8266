@@ -12,20 +12,20 @@
 char ssid[] = "Homhuanta_2.4G";
 char pass[] = "0877705609";
 
-// สร้าง Instance สำหรับจอ LCD
-LiquidCrystal_I2C lcd(0x27, 16, 2); 
+// ตั้งค่าจอ LCD 20x04
+LiquidCrystal_I2C lcd(0x27, 20, 4); 
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 BH1750 lightMeter;
 
+// กำหนดขาสำหรับ ESP8266 (NodeMCU)
 #define SOIL_PIN A0
-#define RELAY1 D5
-#define RELAY2 D6
-#define RELAY3 D7
-#define RELAY4 D8
+#define RELAY1   D5    // ปั๊มน้ำ (Soil)
+#define RELAY2   D6    // พัดลม (Temp)
+#define RELAY3   D7    // พ่นหมอก (Hum)
+#define RELAY4   D8    // ไฟปลูกพืช (Light)
 
 BlynkTimer timer;
 
-// ตัวแปรสถานะโหมด (false = Manual, true = Auto)
 bool isAutoMode = false;
 
 // ฟังก์ชันสั่งเปิด/ปิด Relay แบบ Active LOW
@@ -33,24 +33,26 @@ void setRelay(int pin, int state) {
   digitalWrite(pin, state ? LOW : HIGH);
 }
 
-// ปุ่มเปิด/ปิดโหมด Auto บน Blynk (Pin V8)
+// เช็กสถานะ Relay (คืนค่า true ถ้าทำงานอยู่)
+bool getRelayState(int pin) {
+  return digitalRead(pin) == LOW; // Active LOW: LOW คือ ON
+}
+
 BLYNK_WRITE(V8) {
   isAutoMode = param.asInt();
   Serial.print("Mode changed to: ");
   Serial.println(isAutoMode ? "AUTO" : "MANUAL");
 }
 
-// ควบคุมแบบ Manual (ทำงานเมื่อ isAutoMode = false)
 BLYNK_WRITE(V4) { if (!isAutoMode) setRelay(RELAY1, param.asInt()); }
 BLYNK_WRITE(V5) { if (!isAutoMode) setRelay(RELAY2, param.asInt()); }
 BLYNK_WRITE(V6) { if (!isAutoMode) setRelay(RELAY3, param.asInt()); }
 BLYNK_WRITE(V7) { if (!isAutoMode) setRelay(RELAY4, param.asInt()); }
 
-// ฟังก์ชันเงื่อนไขทำงานอัตโนมัติ (Auto Mode)
 void autoControl(int soil, float temp, float hum, float lux) {
   if (!isAutoMode) return;
 
-  // 1. คุม Relay 1 ตามความชื้นดิน
+  // 1. คุม Relay 1 (Soil)
   if (soil < 40) {
     setRelay(RELAY1, HIGH);
     Blynk.virtualWrite(V4, 1);
@@ -59,7 +61,7 @@ void autoControl(int soil, float temp, float hum, float lux) {
     Blynk.virtualWrite(V4, 0);
   }
 
-  // 2. คุม Relay 2 ตามอุณหภูมิ (พัดลม)
+  // 2. คุม Relay 2 (Temp)
   if (temp > 35.0) {
     setRelay(RELAY2, HIGH);
     Blynk.virtualWrite(V5, 1);
@@ -68,7 +70,7 @@ void autoControl(int soil, float temp, float hum, float lux) {
     Blynk.virtualWrite(V5, 0);
   }
 
-  // 3. คุม Relay 3 ตามความชื้นอากาศ (พ่นหมอก)
+  // 3. คุม Relay 3 (Hum)
   if (hum < 50.0) {
     setRelay(RELAY3, HIGH);
     Blynk.virtualWrite(V6, 1);
@@ -77,7 +79,7 @@ void autoControl(int soil, float temp, float hum, float lux) {
     Blynk.virtualWrite(V6, 0);
   }
 
-  // 4. คุม Relay 4 ตามระดับแสง (ไฟปลูกต้นไม้/หลอดไฟ)
+  // 4. คุม Relay 4 (Lux)
   if (lux < 200.0) {
     setRelay(RELAY4, HIGH);
     Blynk.virtualWrite(V7, 1);
@@ -88,97 +90,87 @@ void autoControl(int soil, float temp, float hum, float lux) {
 }
 
 void sendSensorData() {
-  // อ่านค่า Soil Moisture
   int analogSoil = analogRead(SOIL_PIN);
   int soilPercent = map(analogSoil, 1023, 400, 0, 100);
   soilPercent = constrain(soilPercent, 0, 100);
 
-  // อ่านค่า SHT31
   float temp = sht31.readTemperature();
   float humidity = sht31.readHumidity();
-
-  // อ่านค่า BH1750
   float lux = lightMeter.readLightLevel();
 
-  // ตรวจสอบความถูกต้องของค่าเซนเซอร์
   if (isnan(temp)) temp = 0.0;
   if (isnan(humidity)) humidity = 0.0;
   if (lux < 0) lux = 0.0;
 
-  // ประมวลผลโหมด Auto
   autoControl(soilPercent, temp, humidity, lux);
 
-  // ส่งข้อมูลเข้า Blynk
   Blynk.virtualWrite(V0, soilPercent);
   Blynk.virtualWrite(V1, temp);
   Blynk.virtualWrite(V2, humidity);
   Blynk.virtualWrite(V3, lux);
 
-  // แสดงผลบนจอ LCD (เขียนทับช่องว่างเพื่อป้องกันจอกระพริบ)
+  // แสดงผลบนจอ LCD 20x04
+  // บรรทัดที่ 1: อุณหภูมิ (T) + ความชื้นอากาศ (H) + โหมด (A/M)
   lcd.setCursor(0, 0);
-  lcd.print("T:"); lcd.print((int)temp); lcd.print("C ");
-  lcd.print("H:"); lcd.print((int)humidity); lcd.print("% ");
-  lcd.print(isAutoMode ? "A" : "M");
+  lcd.print("T:"); lcd.print((int)temp); lcd.print("C    ");
+  lcd.setCursor(8, 0);
+  lcd.print("H:"); lcd.print((int)humidity); lcd.print("%   ");
+  lcd.setCursor(18, 0);
 
+
+  // บรรทัดที่ 2: ความชื้นดิน (S) + แสง (L)
   lcd.setCursor(0, 1);
-  lcd.print("S:"); lcd.print(soilPercent); lcd.print("%   ");
-  lcd.print("L:"); lcd.print((int)lux); lcd.print("lx   ");
+  lcd.print("S:"); lcd.print(soilPercent); lcd.print("%    ");
+  lcd.setCursor(8, 1);
+  lcd.print("L:"); lcd.print((int)lux); lcd.print("lx     ");
+
+  // บรรทัดที่ 3: สถานะ Relay ดิน (Soil) + Relay อุณหภูมิ (Temp)
+  lcd.setCursor(0, 2);
+  lcd.print("Soil:"); lcd.print(getRelayState(RELAY1) ? "ON " : "OFF");
+  lcd.setCursor(10, 2);
+  lcd.print("Temp:"); lcd.print(getRelayState(RELAY2) ? "ON " : "OFF");
+
+  // บรรทัดที่ 4: สถานะ Relay ความชื้น (Hum) + Relay แสง (Light)
+  lcd.setCursor(0, 3);
+  lcd.print("Hum :"); lcd.print(getRelayState(RELAY3) ? "ON " : "OFF");
+  lcd.setCursor(10, 3);
+  lcd.print("Light:"); lcd.print(getRelayState(RELAY4) ? "ON " : "OFF");
 }
 
-// ฟังก์ชันค้นหา I2C Address ของจอ LCD
 uint8_t findLcdAddress() {
   uint8_t addresses[] = {0x27, 0x3F, 0x20, 0x38};
   for (uint8_t addr : addresses) {
     Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.print("LCD Found at Address: 0x");
-      Serial.println(addr, HEX);
-      return addr;
-    }
+    if (Wire.endTransmission() == 0) return addr;
   }
-  return 0x27; // ค่า Default หากสแกนไม่พบ
+  return 0x27;
 }
 
 void setup() {
   Serial.begin(115200);
 
-  // กำหนดขา Relay และตั้งสถานะเริ่มต้นเป็นปิด (Active LOW)
   pinMode(RELAY1, OUTPUT); digitalWrite(RELAY1, HIGH);
   pinMode(RELAY2, OUTPUT); digitalWrite(RELAY2, HIGH);
   pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
   pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
 
-  // เริ่มต้นบัส I2C (SDA = D2, SCL = D1)
   Wire.begin(D2, D1);
 
-  // เริ่มต้นการทำงานของจอ LCD
-  uint8_t lcdAddr = findLcdAddress();
-  lcd = LiquidCrystal_I2C(lcdAddr, 16, 2);
+uint8_t lcdAddr = findLcdAddress();
+  lcd = LiquidCrystal_I2C(lcdAddr, 20, 4);
   lcd.init();
   lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("System Starting");
+  lcd.clear(); // ล้างคราบอักษรเก่าออกทั้งหมด
+  lcd.print("ESP8266 Starting..");
 
-  // เริ่มต้น SHT31 (ลองทั้ง Address 0x44 และ 0x45)
   if (!sht31.begin(0x44) && !sht31.begin(0x45)) {
     Serial.println("SHT3x not found!");
-  } else {
-    Serial.println("SHT3x Ready!");
   }
 
-  // เริ่มต้น BH1750 (ลองทั้ง Address 0x23 และ 0x5C)
   if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &Wire)) {
-    if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x5C, &Wire)) {
-      Serial.println(F("[BH1750] Device is NOT connected!"));
-    } else {
-      Serial.println(F("[BH1750] Connected at 0x5C!"));
-    }
-  } else {
-    Serial.println(F("[BH1750] Connected at 0x23!"));
+    lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x5C, &Wire);
   }
 
-  // เชื่อมต่อ Blynk
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
   timer.setInterval(2000L, sendSensorData);
 }
