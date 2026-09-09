@@ -1,0 +1,164 @@
+#include <DHT.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// ================= PIN CONFIG =================
+#define DHTPIN 5
+#define DHTTYPE DHT11
+
+#define RELAY_FAN 6
+#define RELAY_PUMP 7
+
+#define SOIL_PIN A0
+
+#define BTN_FAN 2
+#define BTN_PUMP 3
+
+// ================= LCD & DHT =================
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+DHT dht(DHTPIN, DHTTYPE);
+
+// ================= STATE & BUTTONS =================
+bool fanState = false;
+bool pumpState = false;
+
+bool lastBtnFanState = HIGH;
+bool lastBtnPumpState = HIGH;
+
+// ตัวแปรจับเวลาแยกกัน
+unsigned long lastDebounceFanTime = 0;
+unsigned long lastDebouncePumpTime = 0;
+const unsigned long DEBOUNCE_DELAY = 50; // หน่วงกันปุ่มเด้งโดยไม่ใช้ delay()
+
+unsigned long lastSensorTime = 0;
+const unsigned long SENSOR_INTERVAL = 2000; // อ่าน DHT11 ทุก 2 วินาที
+
+// ตัวแปรเก็บค่าเซนเซอร์
+float currentTemp = 0.0;
+bool isTempError = true;
+int currentSoil = 0;
+
+void setup() {
+  Serial.begin(9600);
+
+  // Relay Active LOW
+  digitalWrite(RELAY_FAN, HIGH);
+  digitalWrite(RELAY_PUMP, HIGH);
+  pinMode(RELAY_FAN, OUTPUT);
+  pinMode(RELAY_PUMP, OUTPUT);
+
+  // Buttons Input Pullup
+  pinMode(BTN_FAN, INPUT_PULLUP);
+  pinMode(BTN_PUMP, INPUT_PULLUP);
+
+  dht.begin();
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Farm");
+  lcd.setCursor(0, 1);
+  lcd.print("Manual Mode");
+  delay(2000);
+  lcd.clear();
+  
+  updateLCDDisplay();
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // =================================================
+  // 1. เช็คปุ่มกดพัดลม (Non-blocking Debounce)
+  // =================================================
+  bool readingFan = digitalRead(BTN_FAN);
+  if (readingFan != lastBtnFanState) {
+    lastDebounceFanTime = currentMillis;
+  }
+  if ((currentMillis - lastDebounceFanTime) > DEBOUNCE_DELAY) {
+    // ถ้าระบบนิ่งพอแล้ว และมีการเปลี่ยนสถานะเป็นกด (LOW)
+    static bool fanStateNow = HIGH;
+    if (readingFan != fanStateNow) {
+      fanStateNow = readingFan;
+      if (fanStateNow == LOW) {
+        fanState = !fanState; // สลับสถานะ
+        updateLCDStatusOnly(); // อัปเดตหน้าจอเฉพาะส่วนรีเลย์ทันที
+      }
+    }
+  }
+  lastBtnFanState = readingFan;
+
+  // =================================================
+  // 2. เช็คปุ่มกดปั๊มน้ำ (Non-blocking Debounce)
+  // =================================================
+  bool readingPump = digitalRead(BTN_PUMP);
+  if (readingPump != lastBtnPumpState) {
+    lastDebouncePumpTime = currentMillis;
+  }
+  if ((currentMillis - lastDebouncePumpTime) > DEBOUNCE_DELAY) {
+    static bool pumpStateNow = HIGH;
+    if (readingPump != pumpStateNow) {
+      pumpStateNow = readingPump;
+      if (pumpStateNow == LOW) {
+        pumpState = !pumpState; // สลับสถานะ
+        updateLCDStatusOnly(); // อัปเดตหน้าจอเฉพาะส่วนรีเลย์ทันที
+      }
+    }
+  }
+  lastBtnPumpState = readingPump;
+
+  // =================================================
+  // 3. สั่งงาน Relay (ทำงานทันทีแบบ Real-time)
+  // =================================================
+  digitalWrite(RELAY_FAN, fanState ? LOW : HIGH);
+  digitalWrite(RELAY_PUMP, pumpState ? LOW : HIGH);
+
+  // =================================================
+  // 4. อ่านค่าเซนเซอร์ทุก 2 วินาที (ไม่ดึงเวลาของระบบ)
+  // =================================================
+  if (currentMillis - lastSensorTime >= SENSOR_INTERVAL) {
+    lastSensorTime = currentMillis;
+
+    float t = dht.readTemperature();
+    if (isnan(t)) {
+      isTempError = true;
+    } else {
+      isTempError = false;
+      currentTemp = t;
+    }
+
+    int soilRaw = analogRead(SOIL_PIN);
+    currentSoil = constrain(map(soilRaw, 1023, 0, 0, 100), 0, 100);
+
+    updateLCDDisplay();
+  }
+}
+
+// แสดงผลทั้งหมดบน LCD
+void updateLCDDisplay() {
+  lcd.setCursor(0, 0);
+  lcd.print("T:");
+  if (isTempError) {
+    lcd.print("ERR ");
+  } else {
+    lcd.print(currentTemp, 1);
+    lcd.print("C ");
+  }
+
+  lcd.print("S:");
+  lcd.print(currentSoil);
+  lcd.print("%   ");
+
+  updateLCDStatusOnly();
+}
+
+// อัปเดตเฉพาะบรรทัด F: และ P: เพื่อให้ตอบสนองปุ่มกดได้เร็วที่สุด
+void updateLCDStatusOnly() {
+  lcd.setCursor(0, 1);
+  lcd.print("F:");
+  lcd.print(fanState ? "ON " : "OFF");
+  lcd.print(" P:");
+  lcd.print(pumpState ? "ON " : "OFF");
+}
