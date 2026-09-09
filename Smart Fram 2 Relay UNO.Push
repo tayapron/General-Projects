@@ -6,12 +6,12 @@
 #define DHTPIN 5
 #define DHTTYPE DHT11
 
-#define RELAY_FAN 6
+#define RELAY_FAN 8
 #define RELAY_PUMP 7
 
 #define SOIL_PIN A0
 
-#define BTN_FAN 2
+#define BTN_FAN 4
 #define BTN_PUMP 3
 
 // ================= LCD & DHT =================
@@ -25,15 +25,15 @@ bool pumpState = false;
 bool lastBtnFanState = HIGH;
 bool lastBtnPumpState = HIGH;
 
-// ตัวแปรจับเวลาแยกกัน
+// จับเวลาสำหรับ Debounce ปุ่มกด
 unsigned long lastDebounceFanTime = 0;
 unsigned long lastDebouncePumpTime = 0;
-const unsigned long DEBOUNCE_DELAY = 50; // หน่วงกันปุ่มเด้งโดยไม่ใช้ delay()
+const unsigned long DEBOUNCE_DELAY = 50;
 
+// จับเวลาสำหรับอ่านเซนเซอร์ทุก 2 วินาที
 unsigned long lastSensorTime = 0;
-const unsigned long SENSOR_INTERVAL = 2000; // อ่าน DHT11 ทุก 2 วินาที
+const unsigned long SENSOR_INTERVAL = 2000;
 
-// ตัวแปรเก็บค่าเซนเซอร์
 float currentTemp = 0.0;
 bool isTempError = true;
 int currentSoil = 0;
@@ -41,13 +41,14 @@ int currentSoil = 0;
 void setup() {
   Serial.begin(9600);
 
-  // Relay Active LOW
+  // กำหนดขารีเลย์ ( Active LOW: สั่ง HIGH เพื่อปิดไว้ก่อนในตอนเริ่ม )
+  // **หมายเหตุ:** หากรีเลย์ของคุณเป็น Active HIGH ให้เปลี่ยน HIGH เป็น LOW
   digitalWrite(RELAY_FAN, HIGH);
   digitalWrite(RELAY_PUMP, HIGH);
   pinMode(RELAY_FAN, OUTPUT);
   pinMode(RELAY_PUMP, OUTPUT);
 
-  // Buttons Input Pullup
+  // กำหนดขาปุ่มกด (ใช้ R-Pullup ภายใน: ขาหนึ่งต่อ Pin อีกขาต่อ GND)
   pinMode(BTN_FAN, INPUT_PULLUP);
   pinMode(BTN_PUMP, INPUT_PULLUP);
 
@@ -63,7 +64,7 @@ void setup() {
   lcd.print("Manual Mode");
   delay(2000);
   lcd.clear();
-  
+
   updateLCDDisplay();
 }
 
@@ -71,27 +72,26 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // =================================================
-  // 1. เช็คปุ่มกดพัดลม (Non-blocking Debounce)
+  // 1. เช็คปุ่มกดพัดลม (กด 1 ครั้งสลับ ON/OFF)
   // =================================================
   bool readingFan = digitalRead(BTN_FAN);
   if (readingFan != lastBtnFanState) {
     lastDebounceFanTime = currentMillis;
   }
   if ((currentMillis - lastDebounceFanTime) > DEBOUNCE_DELAY) {
-    // ถ้าระบบนิ่งพอแล้ว และมีการเปลี่ยนสถานะเป็นกด (LOW)
     static bool fanStateNow = HIGH;
     if (readingFan != fanStateNow) {
       fanStateNow = readingFan;
       if (fanStateNow == LOW) {
-        fanState = !fanState; // สลับสถานะ
-        updateLCDStatusOnly(); // อัปเดตหน้าจอเฉพาะส่วนรีเลย์ทันที
+        fanState = !fanState;
+        updateLCDStatusOnly();
       }
     }
   }
   lastBtnFanState = readingFan;
 
   // =================================================
-  // 2. เช็คปุ่มกดปั๊มน้ำ (Non-blocking Debounce)
+  // 2. เช็คปุ่มกดปั๊มน้ำ (กด 1 ครั้งสลับ ON/OFF)
   // =================================================
   bool readingPump = digitalRead(BTN_PUMP);
   if (readingPump != lastBtnPumpState) {
@@ -102,21 +102,22 @@ void loop() {
     if (readingPump != pumpStateNow) {
       pumpStateNow = readingPump;
       if (pumpStateNow == LOW) {
-        pumpState = !pumpState; // สลับสถานะ
-        updateLCDStatusOnly(); // อัปเดตหน้าจอเฉพาะส่วนรีเลย์ทันที
+        pumpState = !pumpState;
+        updateLCDStatusOnly();
       }
     }
   }
   lastBtnPumpState = readingPump;
 
   // =================================================
-  // 3. สั่งงาน Relay (ทำงานทันทีแบบ Real-time)
+  // 3. สั่งงาน Relay (Active LOW)
+  // **หากรีเลย์ทำงานตรงข้าม ให้เปลี่ยน LOW : HIGH เป็น HIGH : LOW**
   // =================================================
   digitalWrite(RELAY_FAN, fanState ? LOW : HIGH);
   digitalWrite(RELAY_PUMP, pumpState ? LOW : HIGH);
 
   // =================================================
-  // 4. อ่านค่าเซนเซอร์ทุก 2 วินาที (ไม่ดึงเวลาของระบบ)
+  // 4. อ่านค่าเซนเซอร์ทุก 2 วินาที (Non-blocking)
   // =================================================
   if (currentMillis - lastSensorTime >= SENSOR_INTERVAL) {
     lastSensorTime = currentMillis;
@@ -136,7 +137,7 @@ void loop() {
   }
 }
 
-// แสดงผลทั้งหมดบน LCD
+// อัปเดตหน้าจอทั้งหมด
 void updateLCDDisplay() {
   lcd.setCursor(0, 0);
   lcd.print("T:");
@@ -154,7 +155,7 @@ void updateLCDDisplay() {
   updateLCDStatusOnly();
 }
 
-// อัปเดตเฉพาะบรรทัด F: และ P: เพื่อให้ตอบสนองปุ่มกดได้เร็วที่สุด
+// อัปเดตเฉพาะสถานะ F: และ P: ให้ตอบสนองเร็วที่สุด
 void updateLCDStatusOnly() {
   lcd.setCursor(0, 1);
   lcd.print("F:");
