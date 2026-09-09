@@ -1,49 +1,46 @@
-// Rain Alert Project - Arduino
-// HW-028 Rain Sensor + Buzzer + Mute Button
+#define WATER_SENSOR_PIN 4  // พินเซนเซอร์น้ำ (ต่อขา DO)
+#define BUZZER_PIN 7        // พินออด
+#define BUTTON_PIN 5        // พินปุ่มกด (อีกขาต่อลง GND)
 
-const int rainDigitalPin = 2;   // D0 จากโมดูลเซนเซอร์น้ำฝน -> Pin 2
-const int rainAnalogPin  = A0;  // A0 จากโมดูลเซนเซอร์น้ำฝน -> Pin A0
-const int buttonPin      = 3;   // ปุ่มกด Mute -> Pin 3 (ต่อข้ามร่อง Breadboard และอีกขาต่อ GND)
-const int buzzerPin      = 8;   // Buzzer -> Pin 8
-
-bool isMuted = false;           // ตัวแปรเก็บสถานะการเปิด/ปิดเสียงเตือน
+bool isMuted = false;       // ตัวแปรเก็บสถานะว่าถูกกดปิดเสียงอยู่หรือไม่
 
 void setup() {
-  pinMode(rainDigitalPin, INPUT);
-  pinMode(buttonPin, INPUT_PULLUP); // ใช้ Pull-up ตัวต้านทานภายในบอร์ด
-  pinMode(buzzerPin, OUTPUT);
-  Serial.begin(9600);
+  Serial.begin(9600);       // เปิดใช้งาน Serial Monitor
+  
+  pinMode(WATER_SENSOR_PIN, INPUT_PULLUP); // เซนเซอร์น้ำแบบ Pull-up
+  pinMode(BUZZER_PIN, OUTPUT);             // ออดเป็น Output
+  pinMode(BUTTON_PIN, INPUT_PULLUP);       // ปุ่มกดแบบ Pull-up (กดแล้วเป็น LOW)
 }
 
 void loop() {
-  int digitalVal  = digitalRead(rainDigitalPin); // LOW = เจอฝน/น้ำ, HIGH = ปกติ/แห้ง
-  int analogVal   = analogRead(rainAnalogPin);   // ค่าอนาล็อก (ยิ่งต่ำ = ฝนยิ่งตกหนัก)
-  int buttonState = digitalRead(buttonPin);     // LOW = กำลังกดปุ่ม
+  int waterStatus = digitalRead(WATER_SENSOR_PIN);
+  int buttonStatus = digitalRead(BUTTON_PIN);
 
-  // หากมีการกดปุ่ม ให้เปลี่ยนสถานะเป็น Mute (ปิดเสียง)
-  if (buttonState == LOW) {
+  // แสดงค่าที่อ่านได้ลงใน Serial Monitor
+  Serial.print("Sensor: ");
+  Serial.print(waterStatus);
+  Serial.print(" | Button: ");
+  Serial.println(buttonStatus);
+
+  // ถ้ามีการกดปุ่ม (ค่าเป็น LOW เพราะใช้ INPUT_PULLUP) ให้ทำการรีเซ็ตสถานะเงียบ
+  if (buttonStatus == LOW) {
     isMuted = true;
+    Serial.println("-> กดปุ่ม: ปิดเสียงชั่วคราว");
+    delay(200); // กันสัญญาณรบกวนเวลา press debounce
   }
 
-  // หากฝนหยุดตกแล้ว (เซนเซอร์กลับมาแห้ง) ให้ยกเลิกการ Mute เพื่อเตรียมเตือนในครั้งถัดไป
-  if (digitalVal == HIGH) {
+  // ถ้าเซนเซอร์แห้ง (ไม่มีน้ำ) ให้รีเซ็ตค่า isMuted กลับเป็น false เพื่อรอเตือนรอบใหม่
+  if (waterStatus == HIGH) {
     isMuted = false;
   }
 
-  // แสดงผลค่าผ่าน Serial Monitor
-  Serial.print("Digital: ");
-  Serial.print(digitalVal);
-  Serial.print(" | Analog: ");
-  Serial.print(analogVal);
-  Serial.print(" | Mute Status: ");
-  Serial.println(isMuted ? "MUTED" : "ON");
-
-  // เงื่อนไขสั่งงาน Buzzer
-  if (digitalVal == LOW && !isMuted) {
-    tone(buzzerPin, 1000); // ตรวจพบฝนตก และยังไม่ได้กด Mute -> ส่งเสียงเตือน 1000Hz
+  // เงื่อนไขการทำงานของออด
+  // ต้องตรวจพบน้ำ (LOW) และยังไม่ได้กดปิดเสียง (!isMuted)
+  if (waterStatus == LOW && !isMuted) {     
+    tone(BUZZER_PIN, 1000);  // ส่งเสียงเตือน
   } else {
-    noTone(buzzerPin);     // ฝนหยุดตก หรือกดปิดเสียงแล้ว -> ปิดเสียง
+    noTone(BUZZER_PIN);      // หยุดส่งเสียง (ถ้าน้ำแห้ง หรือ กดปุ่มปิดเสียงแล้ว)
   }
 
-  delay(200);
+  delay(100);  
 }
