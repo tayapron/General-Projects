@@ -1,46 +1,69 @@
-#define WATER_SENSOR_PIN 4  // พินเซนเซอร์น้ำ (ต่อขา DO)
-#define BUZZER_PIN 7        // พินออด
-#define BUTTON_PIN 5        // พินปุ่มกด (อีกขาต่อลง GND)
+#define RAIN_ANALOG_PIN A0   // ขา AO ของเซนเซอร์น้ำฝน
+#define BUZZER_PIN 7        // ขาส่งสัญญาณออด
+#define BUTTON_PIN 5        // ขาปุ่มกดปิดเสียง
 
-bool isMuted = false;       // ตัวแปรเก็บสถานะว่าถูกกดปิดเสียงอยู่หรือไม่
+const int RAIN_THRESHOLD = 700; // ค่าน้อยกว่า 700 ถือว่าเปียก/ฝนตก
+
+bool isMuted = false;
+int lastButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50; // หน่วงเวลาป้องกันสัญญาณรบกวน 50ms
 
 void setup() {
-  Serial.begin(9600);       // เปิดใช้งาน Serial Monitor
+  Serial.begin(9600);
   
-  pinMode(WATER_SENSOR_PIN, INPUT_PULLUP); // เซนเซอร์น้ำแบบ Pull-up
-  pinMode(BUZZER_PIN, OUTPUT);             // ออดเป็น Output
-  pinMode(BUTTON_PIN, INPUT_PULLUP);       // ปุ่มกดแบบ Pull-up (กดแล้วเป็น LOW)
+  pinMode(RAIN_ANALOG_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.println("=== ระบบตรวจจับน้ำฝน (กดปุ่มหยุดเสียงทันที) ===");
 }
 
 void loop() {
-  int waterStatus = digitalRead(WATER_SENSOR_PIN);
-  int buttonStatus = digitalRead(BUTTON_PIN);
+  // 1. อ่านค่าจากเซนเซอร์น้ำฝน
+  int rawRainValue = analogRead(RAIN_ANALOG_PIN);
+  bool isRaining = (rawRainValue < RAIN_THRESHOLD);
 
-  // แสดงค่าที่อ่านได้ลงใน Serial Monitor
-  Serial.print("Sensor: ");
-  Serial.print(waterStatus);
-  Serial.print(" | Button: ");
-  Serial.println(buttonStatus);
+  // 2. อ่านค่าปุ่มกดและปิดเสียงทันที
+  int reading = digitalRead(BUTTON_PIN);
 
-  // ถ้ามีการกดปุ่ม (ค่าเป็น LOW เพราะใช้ INPUT_PULLUP) ให้ทำการรีเซ็ตสถานะเงียบ
-  if (buttonStatus == LOW) {
-    isMuted = true;
-    Serial.println("-> กดปุ่ม: ปิดเสียงชั่วคราว");
-    delay(200); // กันสัญญาณรบกวนเวลา press debounce
+  // ถ้ามีการเปลี่ยนแปลงสถานะปุ่มกด ให้เริ่มจับเวลา
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+    lastButtonState = reading; // อัปเดตสถานะปุ่มกดทันที
   }
 
-  // ถ้าเซนเซอร์แห้ง (ไม่มีน้ำ) ให้รีเซ็ตค่า isMuted กลับเป็น false เพื่อรอเตือนรอบใหม่
-  if (waterStatus == HIGH) {
+  // เมื่อพ้นระยะเวลา Debounce และปุ่มถูกกดลง (LOW)
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (reading == LOW && !isMuted && isRaining) {
+      isMuted = true;
+      noTone(BUZZER_PIN); // *** สั่งหยุดเสียงออดทันทีทันใดที่ตรงเงื่อนไข ***
+      Serial.println("-> กดปุ่ม: ปิดเสียงเตือนทันที!");
+    }
+  }
+
+  // 3. รีเซ็ตสถานะปิดเสียงอัตโนมัติ เมื่อแผ่นเซนเซอร์แห้งแล้ว
+  if (!isRaining) {
     isMuted = false;
   }
 
-  // เงื่อนไขการทำงานของออด
-  // ต้องตรวจพบน้ำ (LOW) และยังไม่ได้กดปิดเสียง (!isMuted)
-  if (waterStatus == LOW && !isMuted) {     
-    tone(BUZZER_PIN, 1000);  // ส่งเสียงเตือน
+  // 4. ควบคุมการส่งเสียงเตือน
+  if (isRaining && !isMuted) {
+    tone(BUZZER_PIN, 1000); // ส่งเสียงเตือนความถี่ 1000Hz
   } else {
-    noTone(BUZZER_PIN);      // หยุดส่งเสียง (ถ้าน้ำแห้ง หรือ กดปุ่มปิดเสียงแล้ว)
+    noTone(BUZZER_PIN);     // หยุดเสียงเมื่อแห้งหรือถูก Mute
   }
 
-  delay(100);  
+  // 5. แสดงผลบน Serial Monitor
+  static unsigned long lastLogTime = 0;
+  if (millis() - lastLogTime > 500) {
+    Serial.print("ค่าความชื้นน้ำฝน (Raw): ");
+    Serial.print(rawRainValue);
+    Serial.print(" | สถานะ: ");
+    Serial.print(isRaining ? "ฝนตก/เปียก [!] " : "ปกติ/แห้ง [OK] ");
+    Serial.print(" | ปิดเสียง: ");
+    Serial.println(isMuted ? "เปิดอยู่ (Muted)" : "ปิดอยู่");
+    
+    lastLogTime = millis();
+  }
 }
