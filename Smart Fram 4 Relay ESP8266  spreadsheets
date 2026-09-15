@@ -1,4 +1,4 @@
-#define BLYNK_TEMPLATE_ID   "TMPL6Vrd3n0Gm"
+#define BLYNK_TEMPLATE_ID "TMPL6Vrd3n0Gm"
 #define BLYNK_TEMPLATE_NAME "Smart fram"
 #define BLYNK_AUTH_TOKEN    "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
 
@@ -15,7 +15,7 @@ char ssid[] = "Homhuanta_2.4G";
 char pass[] = "0877705609";
 
 // ใส่ URL จาก Google Apps Script (Web App URL) ตรงนี้
-const char* googleReportURL = "https://script.google.com/macros/s/AKfycbwDcmEr2ZxAiQ-899MMZlpB4ptSJ9ynWx-qcJ1o8uFxFL8Al0REs2gLMk2wbadrXWz7/exec";
+const char* googleReportURL = "https://script.google.com/macros/s/AKfycbyWK_FgyMUImiXRYqp_f4bYf0itcoOYi9rv1qglU_sqjUZaGm0MnRTVGPm_KY-Omp78/exec";
 
 // ตั้งค่าจอ LCD 20x04
 LiquidCrystal_I2C lcd(0x27, 20, 4); 
@@ -131,24 +131,28 @@ void sendSensorData() {
   Blynk.virtualWrite(V2, currentHumidity);
   Blynk.virtualWrite(V3, currentLux);
 
-  // แสดงผลบนจอ LCD 20x04
+ // แสดงผลบนจอ LCD 20x04
+  // บรรทัดที่ 1: อุณหภูมิ (T) + ความชื้นอากาศ (H) + โหมด (A/M)
   lcd.setCursor(0, 0);
-  lcd.print("T:"); lcd.print((int)currentTemp); lcd.print("C   ");
+  lcd.print("T:"); lcd.print((int)temp); lcd.print("C    ");
   lcd.setCursor(8, 0);
-  lcd.print("H:"); lcd.print((int)currentHumidity); lcd.print("%  ");
-  lcd.setCursor(16, 0);
-  lcd.print(isAutoMode ? "AUTO" : " MAN");
+  lcd.print("H:"); lcd.print((int)humidity); lcd.print("%   ");
+  lcd.setCursor(18, 0);
 
+
+  // บรรทัดที่ 2: ความชื้นดิน (S) + แสง (L)
   lcd.setCursor(0, 1);
-  lcd.print("S:"); lcd.print(currentSoil); lcd.print("%   ");
+  lcd.print("S:"); lcd.print(soilPercent); lcd.print("%    ");
   lcd.setCursor(8, 1);
-  lcd.print("L:"); lcd.print((int)currentLux); lcd.print("lx    ");
+  lcd.print("L:"); lcd.print((int)lux); lcd.print("lx     ");
 
+  // บรรทัดที่ 3: สถานะ Relay ดิน (Soil) + Relay อุณหภูมิ (Temp)
   lcd.setCursor(0, 2);
   lcd.print("Soil:"); lcd.print(getRelayState(RELAY1) ? "ON " : "OFF");
   lcd.setCursor(10, 2);
   lcd.print("Temp:"); lcd.print(getRelayState(RELAY2) ? "ON " : "OFF");
 
+  // บรรทัดที่ 4: สถานะ Relay ความชื้น (Hum) + Relay แสง (Light)
   lcd.setCursor(0, 3);
   lcd.print("Hum :"); lcd.print(getRelayState(RELAY3) ? "ON " : "OFF");
   lcd.setCursor(10, 3);
@@ -240,7 +244,7 @@ void setup() {
 
   // ตั้งค่าเวลาทำงานผ่าน BlynkTimer
   timer.setInterval(2000L, sendSensorData);      // อ่านเซนเซอร์และอัปเดตหน้าจอทุก 2 วินาที
-  timer.setInterval(60000L, sendToGoogleSheets);  // บันทึกลง Google Sheets ทุก 1 นาที (60000ms)
+  timer.setInterval(180000L, sendToGoogleSheets); // บันทึกลง Google Sheets ทุก 3 นาที (180000ms)
 }
 
 void loop() {
