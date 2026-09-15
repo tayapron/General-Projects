@@ -1,0 +1,249 @@
+#define BLYNK_TEMPLATE_ID   "TMPL6Vrd3n0Gm"
+#define BLYNK_TEMPLATE_NAME "Smart fram"
+#define BLYNK_AUTH_TOKEN    "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Adafruit_SHT31.h>
+#include <BH1750.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
+
+char ssid[] = "Homhuanta_2.4G";
+char pass[] = "0877705609";
+
+// ใส่ URL จาก Google Apps Script (Web App URL) ตรงนี้
+const char* googleReportURL = "https://script.google.com/macros/s/AKfycbwDcmEr2ZxAiQ-899MMZlpB4ptSJ9ynWx-qcJ1o8uFxFL8Al0REs2gLMk2wbadrXWz7/exec";
+
+// ตั้งค่าจอ LCD 20x04
+LiquidCrystal_I2C lcd(0x27, 20, 4); 
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
+BH1750 lightMeter;
+
+// กำหนดขาสำหรับ ESP8266 (NodeMCU)
+#define SOIL_PIN A0
+#define RELAY1   D5    // ปั๊มน้ำ (Soil)
+#define RELAY2   D6    // พัดลม (Temp)
+#define RELAY3   D7    // พ่นหมอก (Hum)
+#define RELAY4   D8    // ไฟปลูกพืช (Light)
+
+BlynkTimer timer;
+
+bool isAutoMode = false;
+bool bh1750Ready = false;
+
+// ตัวแปรเก็บค่าเซนเซอร์สำหรับส่ง Google Sheets
+float currentTemp = 0.0;
+float currentHumidity = 0.0;
+int currentSoil = 0;
+float currentLux = 0.0;
+
+// ฟังก์ชันสั่งเปิด/ปิด Relay แบบ Active LOW
+void setRelay(int pin, int state) {
+  digitalWrite(pin, state ? LOW : HIGH);
+}
+
+// เช็กสถานะ Relay (คืนค่า true ถ้าทำงานอยู่)
+bool getRelayState(int pin) {
+  return digitalRead(pin) == LOW; // Active LOW: LOW คือ ON
+}
+
+BLYNK_WRITE(V8) {
+  isAutoMode = param.asInt();
+  Serial.print("Mode changed to: ");
+  Serial.println(isAutoMode ? "AUTO" : "MANUAL");
+}
+
+BLYNK_WRITE(V4) { if (!isAutoMode) setRelay(RELAY1, param.asInt()); }
+BLYNK_WRITE(V5) { if (!isAutoMode) setRelay(RELAY2, param.asInt()); }
+BLYNK_WRITE(V6) { if (!isAutoMode) setRelay(RELAY3, param.asInt()); }
+BLYNK_WRITE(V7) { if (!isAutoMode) setRelay(RELAY4, param.asInt()); }
+
+void autoControl(int soil, float temp, float hum, float lux) {
+  if (!isAutoMode) return;
+
+  // 1. คุม Relay 1 (Soil)
+  if (soil < 40) {
+    setRelay(RELAY1, HIGH);
+    Blynk.virtualWrite(V4, 1);
+  } else if (soil >= 60) {
+    setRelay(RELAY1, LOW);
+    Blynk.virtualWrite(V4, 0);
+  }
+
+  // 2. คุม Relay 2 (Temp)
+  if (temp > 35.0) {
+    setRelay(RELAY2, HIGH);
+    Blynk.virtualWrite(V5, 1);
+  } else if (temp <= 32.0) {
+    setRelay(RELAY2, LOW);
+    Blynk.virtualWrite(V5, 0);
+  }
+
+  // 3. คุม Relay 3 (Hum)
+  if (hum < 50.0) {
+    setRelay(RELAY3, HIGH);
+    Blynk.virtualWrite(V6, 1);
+  } else if (hum >= 70.0) {
+    setRelay(RELAY3, LOW);
+    Blynk.virtualWrite(V6, 0);
+  }
+
+  // 4. คุม Relay 4 (Lux)
+  if (lux < 200.0) {
+    setRelay(RELAY4, HIGH);
+    Blynk.virtualWrite(V7, 1);
+  } else if (lux >= 500.0) {
+    setRelay(RELAY4, LOW);
+    Blynk.virtualWrite(V7, 0);
+  }
+}
+
+void sendSensorData() {
+  int analogSoil = analogRead(SOIL_PIN);
+  int soilPercent = map(analogSoil, 1023, 400, 0, 100);
+  soilPercent = constrain(soilPercent, 0, 100);
+
+  float temp = sht31.readTemperature();
+  float humidity = sht31.readHumidity();
+  float lux = 0.0;
+
+  if (bh1750Ready) {
+    lux = lightMeter.readLightLevel();
+  }
+
+  if (isnan(temp)) temp = 0.0;
+  if (isnan(humidity)) humidity = 0.0;
+  if (lux < 0) lux = 0.0;
+
+  // อัปเดตค่าลงตัวแปร Global เพื่อเตรียมส่งให้ Google Sheets
+  currentSoil = soilPercent;
+  currentTemp = temp;
+  currentHumidity = humidity;
+  currentLux = lux;
+
+  autoControl(currentSoil, currentTemp, currentHumidity, currentLux);
+
+  Blynk.virtualWrite(V0, currentSoil);
+  Blynk.virtualWrite(V1, currentTemp);
+  Blynk.virtualWrite(V2, currentHumidity);
+  Blynk.virtualWrite(V3, currentLux);
+
+  // แสดงผลบนจอ LCD 20x04
+  lcd.setCursor(0, 0);
+  lcd.print("T:"); lcd.print((int)currentTemp); lcd.print("C   ");
+  lcd.setCursor(8, 0);
+  lcd.print("H:"); lcd.print((int)currentHumidity); lcd.print("%  ");
+  lcd.setCursor(16, 0);
+  lcd.print(isAutoMode ? "AUTO" : " MAN");
+
+  lcd.setCursor(0, 1);
+  lcd.print("S:"); lcd.print(currentSoil); lcd.print("%   ");
+  lcd.setCursor(8, 1);
+  lcd.print("L:"); lcd.print((int)currentLux); lcd.print("lx    ");
+
+  lcd.setCursor(0, 2);
+  lcd.print("Soil:"); lcd.print(getRelayState(RELAY1) ? "ON " : "OFF");
+  lcd.setCursor(10, 2);
+  lcd.print("Temp:"); lcd.print(getRelayState(RELAY2) ? "ON " : "OFF");
+
+  lcd.setCursor(0, 3);
+  lcd.print("Hum :"); lcd.print(getRelayState(RELAY3) ? "ON " : "OFF");
+  lcd.setCursor(10, 3);
+  lcd.print("Light:"); lcd.print(getRelayState(RELAY4) ? "ON " : "OFF");
+}
+
+// ฟังก์ชันส่งข้อมูลเข้า Google Sheets
+void sendToGoogleSheets() {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClientSecure client;
+    client.setInsecure(); // ข้ามการเช็ก Fingerprint SSL เพื่อความสะดวกรวดเร็ว
+
+    HTTPClient http;
+    http.begin(client, googleReportURL);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.addHeader("Content-Type", "application/json");
+
+    String r1Status = getRelayState(RELAY1) ? "ON" : "OFF";
+    String r2Status = getRelayState(RELAY2) ? "ON" : "OFF";
+    String r3Status = getRelayState(RELAY3) ? "ON" : "OFF";
+    String r4Status = getRelayState(RELAY4) ? "ON" : "OFF";
+    String autoStatus = isAutoMode ? "ON" : "OFF";
+
+    String jsonPayload = "{";
+    jsonPayload += "\"temp\":" + String(currentTemp, 1) + ",";
+    jsonPayload += "\"hum\":" + String(currentHumidity, 1) + ",";
+    jsonPayload += "\"soil\":" + String(currentSoil) + ",";
+    jsonPayload += "\"lux\":" + String(currentLux, 1) + ",";
+    jsonPayload += "\"r1\":\"" + r1Status + "\",";
+    jsonPayload += "\"r2\":\"" + r2Status + "\",";
+    jsonPayload += "\"r3\":\"" + r3Status + "\",";
+    jsonPayload += "\"r4\":\"" + r4Status + "\",";
+    jsonPayload += "\"auto\":\"" + autoStatus + "\"";
+    jsonPayload += "}";
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode > 0) {
+      Serial.print("Google Sheets Success Code: ");
+      Serial.println(httpResponseCode);
+    } else {
+      Serial.print("Google Sheets Error Code: ");
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  }
+}
+
+uint8_t findLcdAddress() {
+  uint8_t addresses[] = {0x27, 0x3F, 0x20, 0x38};
+  for (uint8_t addr : addresses) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) return addr;
+  }
+  return 0x27;
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY1, OUTPUT); digitalWrite(RELAY1, HIGH);
+  pinMode(RELAY2, OUTPUT); digitalWrite(RELAY2, HIGH);
+  pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
+  pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
+
+  Wire.begin(D2, D1);
+
+  uint8_t lcdAddr = findLcdAddress();
+  lcd = LiquidCrystal_I2C(lcdAddr, 20, 4);
+  lcd.init();
+  lcd.backlight();
+  lcd.clear(); // ล้างคราบอักษรเก่าออกทั้งหมด
+  lcd.print("ESP8266 Starting..");
+
+  if (!sht31.begin(0x44) && !sht31.begin(0x45)) {
+    Serial.println("SHT3x not found!");
+  }
+
+  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &Wire) ||
+      lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x5C, &Wire)) {
+    bh1750Ready = true;
+    Serial.println("BH1750 Initialized.");
+  } else {
+    Serial.println("BH1750 Error!");
+  }
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  // ตั้งค่าเวลาทำงานผ่าน BlynkTimer
+  timer.setInterval(2000L, sendSensorData);      // อ่านเซนเซอร์และอัปเดตหน้าจอทุก 2 วินาที
+  timer.setInterval(60000L, sendToGoogleSheets);  // บันทึกลง Google Sheets ทุก 1 นาที (60000ms)
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
