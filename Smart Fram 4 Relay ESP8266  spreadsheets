@@ -1,4 +1,4 @@
-#define BLYNK_TEMPLATE_ID "TMPL6Vrd3n0Gm"
+#define BLYNK_TEMPLATE_ID   "TMPL6Vrd3n0Gm"
 #define BLYNK_TEMPLATE_NAME "Smart fram"
 #define BLYNK_AUTH_TOKEN    "o6p6DOl_ZyM25thEO3c83Bk0MyiQ7JX1"
 
@@ -14,8 +14,8 @@
 char ssid[] = "Homhuanta_2.4G";
 char pass[] = "0877705609";
 
-// ใส่ URL จาก Google Apps Script (Web App URL) ตรงนี้
-const char* googleReportURL = "https://script.google.com/macros/s/AKfycbyWK_FgyMUImiXRYqp_f4bYf0itcoOYi9rv1qglU_sqjUZaGm0MnRTVGPm_KY-Omp78/exec";
+// Web App URL จาก Google Apps Script
+const char* googleReportURL = "https://script.google.com/macros/s/AKfycbwDcmEr2ZxAiQ-899MMZlpB4ptSJ9ynWx-qcJ1o8uFxFL8Al0REs2gLMk2wbadrXWz7/exec";
 
 // ตั้งค่าจอ LCD 20x04
 LiquidCrystal_I2C lcd(0x27, 20, 4); 
@@ -27,14 +27,14 @@ BH1750 lightMeter;
 #define RELAY1   D5    // ปั๊มน้ำ (Soil)
 #define RELAY2   D6    // พัดลม (Temp)
 #define RELAY3   D7    // พ่นหมอก (Hum)
-#define RELAY4   D8    // ไฟปลูกพืช (Light)
+#define RELAY4   D0    // ไฟปลูกพืช (Light) *ใช้ขา D0 เพื่อป้องกันบอร์ดค้างตอนเปิดเครื่อง
 
 BlynkTimer timer;
 
 bool isAutoMode = false;
 bool bh1750Ready = false;
 
-// ตัวแปรเก็บค่าเซนเซอร์สำหรับส่ง Google Sheets
+// ตัวแปรเก็บค่าเซนเซอร์ล่าสุด
 float currentTemp = 0.0;
 float currentHumidity = 0.0;
 int currentSoil = 0;
@@ -118,7 +118,7 @@ void sendSensorData() {
   if (isnan(humidity)) humidity = 0.0;
   if (lux < 0) lux = 0.0;
 
-  // อัปเดตค่าลงตัวแปร Global เพื่อเตรียมส่งให้ Google Sheets
+  // อัปเดตค่าลงตัวแปร Global
   currentSoil = soilPercent;
   currentTemp = temp;
   currentHumidity = humidity;
@@ -126,33 +126,36 @@ void sendSensorData() {
 
   autoControl(currentSoil, currentTemp, currentHumidity, currentLux);
 
-  Blynk.virtualWrite(V0, currentSoil);
-  Blynk.virtualWrite(V1, currentTemp);
-  Blynk.virtualWrite(V2, currentHumidity);
-  Blynk.virtualWrite(V3, currentLux);
+  // ส่งค่าไป Blynk (เฉพาะเมื่อต่อสำเร็จ)
+  if (Blynk.connected()) {
+    Blynk.virtualWrite(V0, currentSoil);
+    Blynk.virtualWrite(V1, currentTemp);
+    Blynk.virtualWrite(V2, currentHumidity);
+    Blynk.virtualWrite(V3, currentLux);
+  }
 
- // แสดงผลบนจอ LCD 20x04
-  // บรรทัดที่ 1: อุณหภูมิ (T) + ความชื้นอากาศ (H) + โหมด (A/M)
+  // --- แสดงผลบนจอ LCD 20x04 ---
+  // บรรทัดที่ 1: อุณหภูมิ (T) + ความชื้นอากาศ (H) (แก้ไขเพื่อลบตัวอักษรขยะ g ออกแล้ว)
   lcd.setCursor(0, 0);
-  lcd.print("T:"); lcd.print((int)temp); lcd.print("C    ");
+  lcd.print("T:"); lcd.print((int)currentTemp); lcd.print("C   ");
   lcd.setCursor(8, 0);
-  lcd.print("H:"); lcd.print((int)humidity); lcd.print("%   ");
-  lcd.setCursor(18, 0);
-
+  lcd.print("H:"); lcd.print((int)currentHumidity); lcd.print("%   ");
+  lcd.setCursor(15, 0);
+  lcd.print(isAutoMode ? " AUTO" : "  MAN");
 
   // บรรทัดที่ 2: ความชื้นดิน (S) + แสง (L)
   lcd.setCursor(0, 1);
-  lcd.print("S:"); lcd.print(soilPercent); lcd.print("%    ");
+  lcd.print("S:"); lcd.print(currentSoil); lcd.print("%   ");
   lcd.setCursor(8, 1);
-  lcd.print("L:"); lcd.print((int)lux); lcd.print("lx     ");
+  lcd.print("L:"); lcd.print((int)currentLux); lcd.print("lx    ");
 
-  // บรรทัดที่ 3: สถานะ Relay ดิน (Soil) + Relay อุณหภูมิ (Temp)
+  // บรรทัดที่ 3: สถานะ Relay 1 (Soil) + Relay 2 (Temp)
   lcd.setCursor(0, 2);
   lcd.print("Soil:"); lcd.print(getRelayState(RELAY1) ? "ON " : "OFF");
   lcd.setCursor(10, 2);
   lcd.print("Temp:"); lcd.print(getRelayState(RELAY2) ? "ON " : "OFF");
 
-  // บรรทัดที่ 4: สถานะ Relay ความชื้น (Hum) + Relay แสง (Light)
+  // บรรทัดที่ 4: สถานะ Relay 3 (Hum) + Relay 4 (Light)
   lcd.setCursor(0, 3);
   lcd.print("Hum :"); lcd.print(getRelayState(RELAY3) ? "ON " : "OFF");
   lcd.setCursor(10, 3);
@@ -163,7 +166,7 @@ void sendSensorData() {
 void sendToGoogleSheets() {
   if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
-    client.setInsecure(); // ข้ามการเช็ก Fingerprint SSL เพื่อความสะดวกรวดเร็ว
+    client.setInsecure(); // ข้ามการเช็ก Fingerprint SSL เพื่อความเสถียร
 
     HTTPClient http;
     http.begin(client, googleReportURL);
@@ -191,10 +194,10 @@ void sendToGoogleSheets() {
     int httpResponseCode = http.POST(jsonPayload);
 
     if (httpResponseCode > 0) {
-      Serial.print("Google Sheets Success Code: ");
+      Serial.print("Google Sheets Code: ");
       Serial.println(httpResponseCode);
     } else {
-      Serial.print("Google Sheets Error Code: ");
+      Serial.print("Google Sheets Error: ");
       Serial.println(httpResponseCode);
     }
 
@@ -213,19 +216,21 @@ uint8_t findLcdAddress() {
 
 void setup() {
   Serial.begin(115200);
+  delay(500);
 
+  // กำหนดขา Relay และตั้งค่าเริ่มต้นเป็น HIGH (ดับ)
   pinMode(RELAY1, OUTPUT); digitalWrite(RELAY1, HIGH);
   pinMode(RELAY2, OUTPUT); digitalWrite(RELAY2, HIGH);
   pinMode(RELAY3, OUTPUT); digitalWrite(RELAY3, HIGH);
   pinMode(RELAY4, OUTPUT); digitalWrite(RELAY4, HIGH);
 
-  Wire.begin(D2, D1);
+  Wire.begin(D2, D1); // SDA = D2, SCL = D1
 
   uint8_t lcdAddr = findLcdAddress();
   lcd = LiquidCrystal_I2C(lcdAddr, 20, 4);
   lcd.init();
   lcd.backlight();
-  lcd.clear(); // ล้างคราบอักษรเก่าออกทั้งหมด
+  lcd.clear(); // เคลียร์หน้าจอล้างข้อความเก่าทั้งหมด
   lcd.print("ESP8266 Starting..");
 
   if (!sht31.begin(0x44) && !sht31.begin(0x45)) {
@@ -240,14 +245,24 @@ void setup() {
     Serial.println("BH1750 Error!");
   }
 
-  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  // เริ่มเชื่อมต่อ Wi-Fi และ Blynk แบบ Non-blocking
+  WiFi.begin(ssid, pass);
+  Blynk.config(BLYNK_AUTH_TOKEN);
 
-  // ตั้งค่าเวลาทำงานผ่าน BlynkTimer
-  timer.setInterval(2000L, sendSensorData);      // อ่านเซนเซอร์และอัปเดตหน้าจอทุก 2 วินาที
-  timer.setInterval(180000L, sendToGoogleSheets); // บันทึกลง Google Sheets ทุก 3 นาที (180000ms)
+  // ตั้งค่าช่วงเวลาทำงาน
+  timer.setInterval(2000L, sendSensorData);       // อ่านค่าเซนเซอร์ทุก 2 วินาที
+  timer.setInterval(180000L, sendToGoogleSheets);  // บันทึกลง Google Sheets ทุก 3 นาที (180,000 ms)
 }
 
 void loop() {
-  Blynk.run();
-  timer.run();
+  // เชื่อมต่อ Blynk เฉพาะเมื่อมี Wi-Fi เพื่อป้องกันบอร์ดค้าง
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!Blynk.connected()) {
+      Blynk.connect(2000); // พยายามเชื่อมต่อ 2 วินาที
+    } else {
+      Blynk.run();
+    }
+  }
+
+  timer.run(); // ให้ระบบเซนเซอร์ หน้าจอ และควบคุมอัตโนมัติทำงานต่อไปได้
 }
